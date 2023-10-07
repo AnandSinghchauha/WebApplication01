@@ -1,0 +1,53 @@
+# Starter pipeline
+# Start with a minimal pipeline that you can customize to build and deploy your code.
+# Add steps that build, run tests, deploy, and more:
+# https://aka.ms/yaml
+
+trigger:
+- main
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  buildConfiguration: 'Release'
+
+steps:
+- task: SonarCloudPrepare@1
+  displayName: Initializing sonarcloud
+  inputs:
+    SonarCloud: 'ADO Testing'
+    organization: 'ado-tdp'
+    scannerMode: 'MSBuild'
+    projectKey: 'ADO_TDP'
+    projectName: 'ADO_TDP_Sonar'
+
+- task: SonarQubePrepare@5
+  displayName: Initializing sonarqube
+  inputs:
+    SonarQube: 'sonarqube'
+    scannerMode: 'MSBuild'
+    projectKey: 'ADO_TDP'
+    projectName: 'ADO_TDP_Sonar'
+
+- task: NuGetCommand@2
+  displayName: Restoring dependencies
+  inputs:
+    command: 'restore'
+    restoreSolution: '**/*.sln'
+    feedsToUse: 'select'
+    vstsFeed: 'fedfdabe-0223-4327-b63b-038a6fea9eb7'
+
+- task: DotNetCoreCLI@2
+  inputs:
+    command: 'build'
+    projects: '**/*.sln'
+  displayName: 'dotnet build $(buildConfiguration)'
+
+- task: SonarQubeAnalyze@5
+  displayName: Analyzing code
+
+- task: SonarQubePublish@5
+  displayName: Publishing sonarcloud result
+  inputs:
+    pollingTimeoutSec: '300'

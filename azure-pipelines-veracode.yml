@@ -1,0 +1,89 @@
+# ASP.NET
+# Build and test ASP.NET projects.
+# Add steps that publish symbols, save build artifacts, deploy, and more:
+# https://docs.microsoft.com/azure/devops/pipelines/apps/aspnet/build-aspnet-4
+
+trigger:
+- main
+
+pool:
+  vmImage: 'windows-latest'
+
+variables:
+  solution: '**/*.sln'
+  buildPlatform: 'Any CPU'
+  buildConfiguration: 'Release'
+
+steps:
+- task: NuGetToolInstaller@1
+
+- task: NuGetCommand@2
+  inputs:
+    restoreSolution: '$(solution)'
+
+- task: VSBuild@1
+  inputs:
+    solution: '$(solution)'
+    msbuildArgs: '/p:DeployOnBuild=true /p:WebPublishMethod=Package /p:PackageAsSingleFile=true /p:SkipInvalidConfigurations=true /p:PackageLocation="$(build.artifactStagingDirectory)"'
+    platform: '$(buildPlatform)'
+    configuration: '$(buildConfiguration)'
+- task: PowerShell@2
+  displayName : Veracode SCA
+  env: {SRCCLR_API_TOKEN: $(SRCCLR_API_TOKEN)}
+  inputs:
+    targetType: 'inline'
+    script: |      
+      dir
+      dir mywebapp
+      Set-ExecutionPolicy AllSigned -Scope Process -Force
+      $ProgressPreference = "silentlyContinue"; iex ((New-Object System.Net.WebClient).DownloadString('https://download.sourceclear.com/ci.ps1'))
+      srcclr scan mywebapp --allow-dirty
+- task: CmdLine@2
+  displayName: Veracode Pipeline Scan
+  inputs:
+    script: |
+      curl -sSO https://downloads.veracode.com/securityscan/pipeline-scan-LATEST.zip
+      unzip -o pipeline-scan-LATEST.zip
+      java -jar pipeline-scan.jar -vid $(VERACODE_API_ID) -vkey $(VERACODE_API_KEY) -f $(build.artifactstagingdirectory)\mywebapp.zip || true
+    # VERACODE_API_ID and VERACODE_API_KEY environment variables must reference your API credentials.
+    # "|| true" specifies to continue build if Pipeline Scan discovers flaws.
+    # To fail the build for new flaws not listed in a baseline file, add an existing baseline file with "-bf <baseline filename>" and remove "|| true".
+
+
+- task: PublishBuildArtifacts@1
+  displayName: Create Build Artifact for Veracode Pipeline Scan Results
+  inputs:
+    PathtoPublish: "results.json"
+    ArtifactName: "Build"
+    publishLocation: "Container"
+  
+- task: VSTest@2
+  inputs:
+    platform: '$(buildPlatform)'
+    configuration: '$(buildConfiguration)'
+
+- task: Veracode@3
+  displayName : Veracode Upload and Scan
+  inputs:
+    ConnectionDetailsSelection: 'Service Connection'
+    AnalysisService: 'VeracodeServiceConnection'
+    veracodeAppProfile: '$(system.teamProject)'
+    version: '$(build.buildNumber)'
+    filepath: '$(build.artifactstagingdirectory)'
+    createProfile: true
+    importResults: true
+    failBuildOnPolicyFail: false
+    maximumWaitTime: '360'
+- task: Veracode Flaw Importer@3
+  inputs:
+    ConnectionDetailsSelection: 'Service Connection'
+    AnalysisService: 'VeracodeServiceConnection'
+    veracodeAppProfile: '$(system.teamProject)'
+    sandboxName: 
+    scanType: 'Dynamic and Static Analysis'
+    importType: 'All Unmitigated Flaws Violating Policy'
+    workItemType: 'Epic'
+    area: '$(system.teamProject)'
+    overwriteAreaPathInWorkItemsOnImport: true
+    flawImportLimit: '1000'
+

@@ -1,0 +1,60 @@
+trigger:
+- main
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+steps:
+- task: PowerShell@2
+  displayName: 'Install Java 11'
+  inputs:
+    targetType: 'inline'
+    script: |
+      $url = "https://download.java.net/java/GA/jdk11/9/GPL/openjdk-11.0.2_linux-x64_bin.tar.gz"
+      $fileName = "openjdk-11.0.2_linux-x64_bin.tar.gz"
+      $javaInstallPath = "C:\Program Files\Java\jdk-11.0.2"
+      New-Item -ItemType Directory -Force -Path $javaInstallPath
+      Invoke-WebRequest -Uri $url -OutFile $fileName
+      tar -xzf $fileName -C $javaInstallPath --strip-components 1
+      $newPath = $env:Path + ';' + Join-Path $javaInstallPath 'bin\'
+      [Environment]::SetEnvironmentVariable('Path', $newPath, 'Machine')
+      java -version
+
+# - task: DownloadSecureFile@1
+#   displayName: 'Download Fortify on Demand credentials'
+#   inputs:
+#     secureFile: 'fortify-credentials'
+
+- task: PowerShell@2
+  displayName: 'Install Fortify SCA'
+  inputs:
+    targetType: 'inline'
+    script: |
+      $fortifyUserName = "$(fortifyUserName)"
+      $fortifyUserToken = "$(fortifyUserToken)"
+      $fortifySSCUrl = "$(fortifySSCUrl)"
+      $fortifyInstallPath = "$env:ProgramFiles\HP_Fortify\HP_Fortify_SCA_and_Apps_20.2"
+      $fortifyZipPath = "$env:TEMP\fortify.zip"
+      $headers = New-Object "System.Collections.Generic.Dictionary[[String],[String]]"
+      $headers.Add("Authorization", "Basic " + [System.Convert]::ToBase64String([System.Text.Encoding]::ASCII.GetBytes("$fortifyUserName:$fortifyUserToken")))
+      Invoke-WebRequest -Uri "$fortifySSCUrl/staticanalyzer/installer/windows/Fortify_SCA_and_Apps_20.2.zip" -Headers $headers -OutFile $fortifyZipPath
+      Expand-Archive -Path $fortifyZipPath -DestinationPath $fortifyInstallPath -Force
+      cd $fortifyInstallPath
+      & .\bin\fortifyupdate.ps1 -installonly
+
+- task: PowerShell@2
+  displayName: 'Run Fortify SCA Scan'
+  inputs:
+    targetType: 'inline'
+    script: |
+      $fortifyUserName = "$(fortifyUserName)"
+      $fortifyUserToken = "$(fortifyUserToken)"
+      $fortifySSCUrl = "$(fortifySSCUrl)"
+      $fortifyInstallPath = "$env:ProgramFiles\HP_Fortify\HP_Fortify_SCA_and_Apps_20.2"
+      $fortifyWorkPath = "$env:TEMP\fortify"
+      $sourcePath = "$(System.DefaultWorkingDirectory)"
+      $buildId = "$(Build.BuildId)"
+      $headers = New-Object "System.Collections.Generic.Dictionary[[String],[String]]"
+      $headers.Add("Authorization", "Basic " + [System.Convert]::ToBase64String([System.Text.Encoding]::ASCII.GetBytes("$fortifyUserName:$fortifyUserToken")))
+      New-Item -ItemType Directory -Force -Path $fortifyWorkPath
+      & $fortifyInstallPath\Core\bin\sourceanalyzer.exe -b $buildId -clean
